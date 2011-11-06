@@ -8,7 +8,8 @@
 #/   make-manifest         Generate a manifest.
 #/      [-s userid]        Sign as userid.
 #/      <crate-file>
-#       <manifest-file>
+#/      <manifest-file>
+#/      [files...]         Additional files to include.
 #/   uninstall             Uninstall a package
 #/      <pkgname>
 #/
@@ -193,11 +194,30 @@ read_rc_attr() {
 }
 
 c_make_manifest() {
+	if [ "$1" = "-s" ]; then
+		[ -z "$2" ] && usage
+		signas="$2"
+		shift; shift
+	fi
 	name=$(read_rc_attr "$1" name)
 	vers=$(read_rc_attr "$1" vers)
+	local manifest="$2"
 
-	echo "name: $name" > $2
-	echo "vers: $vers" >> $2
+	echo "name: $name" > "$manifest"
+	echo "vers: $vers" >> "$manifest"
+	shift; shift
+	[ -z "$signas" ] && return 0
+	for x in $*; do
+		h=$(sha256sum "$x")
+		echo "hash-$x: $h" >> "$manifest"
+	done
+	find . -name '*.rs' -o -name '*.rc' -o -iname '*.mk' \
+		-o -iname 'makefile' -print | while read x; do
+		x=$(echo "$x" | sed -e 's/^\.\///')
+		h=$(sha256sum "$x" | cut -f1 -d' ')
+		echo "hash-$x: $h" >> "$manifest"
+	done
+	gpg -u "$signas" --detach-sign --armor -o manifest.sig manifest
 }
 
 c_uninstall() {
