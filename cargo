@@ -4,6 +4,7 @@
 #/      [key]              Option to get/set
 #/      [val]              Value to set to
 #/   install               Install a package.
+#/      [-s userid]        Require signature by userid.
 #/      <pkgref>
 #/   make-manifest         Generate a manifest.
 #/      [-s userid]        Sign as userid.
@@ -82,6 +83,34 @@ get_manifest() {
 	 sed -n "/^$1: /{s/^$1: //;p}" manifest
 }
 
+# Support three kinds of key checks:
+#   user@host - looked up in existing keyring
+#   short keyid - existing keyring
+check_sig_specific() {
+	r=$(gpg --verify manifest.sig manifest 2>&1)
+	if ! echo "$r" | grep -q "Good signature from"; then
+		echo "Bad signature! GPG output:"
+		echo "$r"
+		die
+	fi
+	if echo "$r" | grep -q "^gpg: Signature made .* key ID $1"; then
+		echo "Good signature from $1."
+		return 0
+	fi
+	if echo "$r" | grep -q "^gpg: Good signature from .* <$1>"; then
+		echo "Good signature from $1."
+		return 0
+	fi
+	if echo "$r" | grep -q "^gpg: Good signature from"; then
+		echo "Signature from wrong key?"
+		echo "$r" | grep "^gpg: Good signature from"
+		die
+	fi
+	echo "Unparseable gpg output:"
+	echo "$r"
+	die
+}
+
 # Install a package from source, which is unpacked in the current directory.
 # Read the name and version out of the manifest, then build, optionally test,
 # and install the package, and symlink any libraries it creates into place.
@@ -91,20 +120,25 @@ get_manifest() {
 #   /manifest: Key-value file with at least keys 'name' and 'version'.
 c_install_source() {
 	need_rustc
+	if [ ! -z "$NEEDED_SIGNER" ]; then
+		check_sig_specific "$NEEDED_SIGNER"
+	fi
 	local name=$(get_manifest name)
-	local version=$(get_manifest version)
+	local vers=$(get_manifest vers)
 	local build=$(get_manifest build)
 	local test=$(get_manifest test)
 	local install=$(get_manifest install)
 	[ -z "$name" ] && die "required property 'name' missing"
-	[ -z "$version" ] && die "required property 'version' missing"
+	[ -z "$vers" ] && die "required property 'vers' missing"
 	[ -z "$build" ] && build=make
 	[ -z "$install" ] && install="make install"
 	rustc=$(get_config rustc)
-	destdir=$(make_fixdir "$name" "$version")
-	RUSTC="$rustc" PREFIX="$destdir" $build
-	[ ! -z "$test" ] && RUSTC="$rustc" PREFIX="$destdir" $test
-	RUSTC="$rustc" PREFIX="$destdir" $install
+	destdir=$(make_fixdir "$name" "$vers")
+	RUSTC="$rustc" PREFIX="$destdir" $build || die "build failed: $build"
+	[ ! -z "$test" ] && (RUSTC="$rustc" PREFIX="$destdir" $test \
+		|| die "test failed: $test")
+	RUSTC="$rustc" PREFIX="$destdir" $install \
+		|| die "install failed: $install"
 	local workdir="$PWD"
 	cd "$destdir"
 	for x in *.so; do
@@ -176,6 +210,11 @@ c_install_url() {
 
 # Do an install.
 c_install() {
+	if [ "$1" = "-s" ]; then
+		[ -z "$2" ] && usage
+		NEEDED_SIGNER="$2"
+		shift; shift
+	fi
 	if echo "$1" | grep -q '^github:'; then
 		c_install_github "$@"
 	elif echo "$1" | grep -q '^file:'; then
@@ -212,11 +251,12 @@ c_make_manifest() {
 		echo "hash-$x: $h" >> "$manifest"
 	done
 	find . -name '*.rs' -o -name '*.rc' -o -iname '*.mk' \
-		-o -iname 'makefile' -print | while read x; do
+		-o -iname 'makefile' | while read x; do
 		x=$(echo "$x" | sed -e 's/^\.\///')
 		h=$(sha256sum "$x" | cut -f1 -d' ')
 		echo "hash-$x: $h" >> "$manifest"
 	done
+	rm -f manifest.sig
 	gpg -u "$signas" --detach-sign --armor -o manifest.sig manifest
 }
 
@@ -238,6 +278,9 @@ case "$cmd" in
 		[ -z "$2" ] && get_config "$1"
 		set_config "$1" "$2"
 		;;
+	checksig)
+		check_sig_specific "$@"
+		;;
 	install)
 		[ -z "$1" ] && usage
 		c_install "$@"
@@ -247,5 +290,8 @@ case "$cmd" in
 		;;
 	uninstall)
 		c_uninstall "$@"
+		;;
+	*)
+		usage
 		;;
 esac
