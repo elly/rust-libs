@@ -1,9 +1,16 @@
 #!/bin/sh
 #/ Usage: cargo <verb> [args...]
-#/   config [key [val]]                         List, get, or set config options.
-#/   install <pkgref>                           Install a package.
-#/   make-manifest <crate-file> <manifest-file> Generate a manifest.
-#/   uninstall <pkgname>                        Uninstall a package.
+#/   config                List, get, or set a config option.
+#/      [key]              Option to get/set
+#/      [val]              Value to set to
+#/   install               Install a package.
+#/      <pkgref>
+#/   make-manifest         Generate a manifest.
+#/      [-s userid]        Sign as userid.
+#/      <crate-file>
+#       <manifest-file>
+#/   uninstall             Uninstall a package
+#/      <pkgname>
 #/
 #/ A 'pkgref' is any of:
 #/   github:<username>/<reponame>[@<commit-id>]    Fetch source from github.
