@@ -28,6 +28,10 @@
 #/   cargo install http://www.leptoquark.net/~elly/rust-hello.tar
 #/   cargo install -s elly@leptoquark.net http://www.leptoquark.net/~elly/rust-hello.tar
 #/   cargo make-manifest hello.rc manifest
+#/
+#/ Config keys:
+#/   rustc = /path/to/rustc
+#/   makeopts = options-to-pass-to-make
 
 die() {
 	echo "$*"
@@ -140,10 +144,11 @@ c_install_source() {
 	local build=$(get_manifest build)
 	local test=$(get_manifest test)
 	local install=$(get_manifest install)
+	local makeopts=$(get_config makeopts)
 	[ -z "$name" ] && die "required property 'name' missing"
 	[ -z "$vers" ] && die "required property 'vers' missing"
-	[ -z "$build" ] && build=make
-	[ -z "$install" ] && install="make install"
+	[ -z "$build" ] && build="make $makeopts"
+	[ -z "$install" ] && install="make $makeopts install"
 	[ -z "$bootstrap" ] && need_rustc
 	rustc=$(get_config rustc)
 	destdir=$(make_fixdir "$name" "$vers")
