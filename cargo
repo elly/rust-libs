@@ -1,0 +1,196 @@
+#!/bin/sh
+#/ Usage: cargo <verb> [args...]
+#/   config [key [val]]  List, get, or set config options.
+#/   install <pkgref>    Install a package.
+#/   uninstall <pkgname>  Uninstall a package.
+#/
+#/ A 'pkgref' is any of:
+#/   github:<username>/<reponame>[@<commit-id>]    Fetch source from github.
+#/   file:<filepath>[@<commit-id>]               Fetch source from local fs.
+#/   <url>                                  Fetch source from tarball at url.
+#/   <uuid>[@<commit-id>]                   Lookup uuid from global registry.
+
+die() {
+	echo "$*"
+	exit 1
+}
+
+make_workdir() {
+	mkdir -p "$HOME/.cargo/work"
+	mktemp -d "$HOME/.cargo/work/$1-XXXXXXXX"
+}
+
+make_fixdir() {
+	local d="$HOME/.cargo/pkg/$1-$2"
+	rm -rf "$d"
+	mkdir -p "$d"
+	echo "$d"
+}
+
+# Check for rustc in the config file, or check for it in the path and store its
+# location in the config file. If we can't find it, die.
+need_rustc() {
+	if [ -n "$(get_config rustc)" ]; then return 0; fi
+	rustc=$(which rustc)
+	if [ -n "$rustc" ]; then
+		echo "Found rustc at $rustc"
+		set_config rustc "$rustc"
+		return 0
+	fi
+	die "Need rustc. Try '$0 config rustc <path>'."
+}
+
+# Write value $2 for config key $1.
+set_config() {
+	mkdir -p "$HOME/.cargo"
+	touch "$HOME/.cargo/config"
+	sed -i -e "s/^$1: //;" "$HOME/.cargo/config"
+	echo "$1: $2" >> "$HOME/.cargo/config"
+}
+
+# Read the value of config key $1.
+get_config() {
+	mkdir -p "$HOME/.cargo"
+	touch "$HOME/.cargo/config"
+	sed -n "/^$1: /{s/^$1: //;p}" "$HOME/.cargo/config"
+}
+
+# Dump the config file.
+list_config() {
+	cat "$HOME/.cargo/config"
+}
+
+# Read the value of a config key in a manifest.
+get_manifest() {
+	 sed -n "/^$1: /{s/^$1: //;p}" manifest
+}
+
+# Install a package from source, which is unpacked in the current directory.
+# Read the name and version out of the manifest, then build, optionally test,
+# and install the package, and symlink any libraries it creates into place.
+# XXX: Manifest signing support
+# XXX: Checksumming support
+c_install_source() {
+	need_rustc
+	local name=$(get_manifest name)
+	local version=$(get_manifest version)
+	local build=$(get_manifest build)
+	local test=$(get_manifest test)
+	local install=$(get_manifest install)
+	[ -z "$name" ] && die "required property 'name' missing"
+	[ -z "$version" ] && die "required property 'version' missing"
+	[ -z "$build" ] && build=make
+	[ -z "$install" ] && install="make install"
+	rustc=$(get_config rustc)
+	destdir=$(make_fixdir "$name" "$version")
+	RUSTC="$rustc" PREFIX="$destdir" $build
+	[ ! -z "$test" ] && RUSTC="$rustc" PREFIX="$destdir" $test
+	RUSTC="$rustc" PREFIX="$destdir" $install
+	local workdir="$PWD"
+	cd "$destdir"
+	for x in *.so; do
+		if [ -x "$x" ]; then
+			mkdir -p "$HOME/.cargo/libs"
+			dname=$(sha1sum "$x" | cut -f1 -d' ')
+			ln -sf "$destdir/$x" "$HOME/.cargo/libs/$dname-$x.so"
+		fi
+	done
+	rm -rf "$workdir"
+}
+
+# Install a package from github. $1 is a string of the form
+# github:<username>/<reponame>[@<commit>]. Make a local clone of the source,
+# check out the specified commit if needed, and do a source install.
+c_install_github() {
+	local urepo=$(echo "$1" | sed -e 's/^github://')
+	local repopath=$(echo "$urepo" | cut -f1 -d@)
+	if echo "$1" | grep -q '@'; then
+		local commit=$(echo "$urepo" | cut -f2 -d@)
+	fi
+	local pkgname=$(echo "$repopath" | cut -f2 -d/)
+	d=$(make_workdir "$pkgname")
+	cd "$d"
+	git clone "git://github.com/$repopath" "$d" || die "git clone failed"
+	if [ ! -z "$commitid" ]; then
+		git checkout "$commit" || die "git checkout $commit failed"
+	fi
+	c_install_source
+}
+
+# Install a package from a local file. The tarball must have a directory
+# component before the expected source layout (no tarbombs!).
+c_install_file() {
+	local filename=$(echo "$1" | sed -e 's/^file://')
+	local pkgname=$(basename "$filename" | cut -f1 -d.)
+	d=$(make_workdir "$pkgname")
+	cd "$d"
+	tar --strip-components=1 -xf "$filename" || die "tar xf '$filename' failed"
+	c_install_source
+}
+
+# Install a package by uuid. Look the uuid up in a global database to resolve it
+# to one of the other install methods, then run that other method.
+# XXX: This should probably be hosted on rust-lang.org or something, or really
+# anywhere but elly's machine.
+c_install_uuid() {
+	local uuid=$(echo "$1" | sed -e 's/^uuid://' | cut -f1 -d@)
+	if echo "$1" | grep -q "@"; then
+		local commit=$(echo "$1" | cut -f2 -d@)
+	fi
+	URL="http://www.leptoquark.net/~elly/cargo-uuids"
+	local res=$(wget -qO- "$URL" | sed -n "/^$uuid: /{s/^$uuid: //;p}")
+	echo "Resolved: $uuid -> $res"
+	[ -n "$commit" ] && res="$res@$commit"
+	c_install "$res"
+}
+
+# Install a package by url of source tarball. Fetch, extract, and do a source
+# install.
+c_install_url() {
+	local pkgname=$(basename "$1")
+	d=$(make_workdir "$pkgname")
+	cd "$d"
+	wget "$1"
+	tar --strip-components=1 -xf * || die "no tar files to extract"
+	c_install_source
+}
+
+# Do an install.
+c_install() {
+	if echo "$1" | grep -q '^github:'; then
+		c_install_github "$@"
+	elif echo "$1" | grep -q '^file:'; then
+		c_install_file "$@"
+	elif echo "$1" | grep -q '^uuid:'; then
+		c_install_uuid "$@"
+	elif echo "$1" | grep -q '://'; then
+		c_install_url "$@"
+	fi
+}
+
+c_uninstall() {
+	echo "Not implemented yet, sorry :(."
+}
+
+usage() {
+	sed -n -e '/^#\//{s/^#\/ \?//;p}' $0
+	exit 1
+}
+
+[ -z "$1" ] && usage
+cmd="$1"; shift
+
+case "$cmd" in
+	config)
+		[ -z "$1" ] && list_config
+		[ -z "$2" ] && get_config "$1"
+		set_config "$1" "$2"
+		;;
+	install)
+		[ -z "$1" ] && usage
+		c_install "$@"
+		;;
+	uninstall)
+		c_uninstall "$@"
+		;;
+esac
