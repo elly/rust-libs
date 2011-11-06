@@ -9,6 +9,13 @@
 #/   file:<filepath>[@<commit-id>]               Fetch source from local fs.
 #/   <url>                                  Fetch source from tarball at url.
 #/   <uuid>[@<commit-id>]                   Lookup uuid from global registry.
+#/
+#/ Examples:
+#/   cargo config rustc /path/to/rustc
+#/   cargo install github:elly/rust-hello
+#/   cargo install file:$HOME/tmp/package.tar
+#/   cargo install uuid:83941200-18b3-41b1-8316-b98a2950b33a
+#/   cargo install http://www.leptoquark.net/~elly/rust-hello.tar
 
 die() {
 	echo "$*"
@@ -70,6 +77,8 @@ get_manifest() {
 # and install the package, and symlink any libraries it creates into place.
 # XXX: Manifest signing support
 # XXX: Checksumming support
+# The directory structure we expect is:
+#   /manifest: Key-value file with at least keys 'name' and 'version'.
 c_install_source() {
 	need_rustc
 	local name=$(get_manifest name)
