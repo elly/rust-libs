@@ -262,7 +262,7 @@ c_make_manifest() {
 	shift; shift
 	[ -z "$signas" ] && return 0
 	for x in $*; do
-		h=$(sha256sum "$x")
+		h=$(sha256sum "$x" | cut -f1 -d' ')
 		echo "hash-$x: $h" >> "$manifest"
 	done
 	find . -name '*.rs' -o -name '*.rc' -o -iname '*.mk' \
