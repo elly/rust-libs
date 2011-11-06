@@ -111,6 +111,14 @@ check_sig_specific() {
 	die
 }
 
+check_hashes() {
+	sed -n '/^hash-/{s/^hash-\([^:]\+\): \(.\+\)/\2  \1/;p}' manifest \
+		| while read line; do
+		echo "$line" | sha256sum -c --quiet || die "cksum wrong: $line"
+	done
+	echo "Checksums match."
+}
+
 # Install a package from source, which is unpacked in the current directory.
 # Read the name and version out of the manifest, then build, optionally test,
 # and install the package, and symlink any libraries it creates into place.
@@ -122,6 +130,7 @@ c_install_source() {
 	need_rustc
 	if [ ! -z "$NEEDED_SIGNER" ]; then
 		check_sig_specific "$NEEDED_SIGNER"
+		check_hashes
 	fi
 	local name=$(get_manifest name)
 	local vers=$(get_manifest vers)
@@ -277,9 +286,6 @@ case "$cmd" in
 		[ -z "$1" ] && list_config
 		[ -z "$2" ] && get_config "$1"
 		set_config "$1" "$2"
-		;;
-	checksig)
-		check_sig_specific "$@"
 		;;
 	install)
 		[ -z "$1" ] && usage
