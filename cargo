@@ -1,8 +1,9 @@
 #!/bin/sh
 #/ Usage: cargo <verb> [args...]
-#/   config [key [val]]  List, get, or set config options.
-#/   install <pkgref>    Install a package.
-#/   uninstall <pkgname>  Uninstall a package.
+#/   config [key [val]]                         List, get, or set config options.
+#/   install <pkgref>                           Install a package.
+#/   make-manifest <crate-file> <manifest-file> Generate a manifest.
+#/   uninstall <pkgname>                        Uninstall a package.
 #/
 #/ A 'pkgref' is any of:
 #/   github:<username>/<reponame>[@<commit-id>]    Fetch source from github.
@@ -16,6 +17,7 @@
 #/   cargo install file:$HOME/tmp/package.tar
 #/   cargo install uuid:83941200-18b3-41b1-8316-b98a2950b33a
 #/   cargo install http://www.leptoquark.net/~elly/rust-hello.tar
+#/   cargo make-manifest hello.rc manifest
 
 die() {
 	echo "$*"
@@ -177,6 +179,20 @@ c_install() {
 	fi
 }
 
+# Generate a manifest file from a .rc file.
+# XXX: Don't parse the crate file this way!
+read_rc_attr() {
+	sed -n "/$2 = \"/{s/.*$2 = \"\([^\"]*\)\".*/\1/;p}" "$1"
+}
+
+c_make_manifest() {
+	name=$(read_rc_attr "$1" name)
+	vers=$(read_rc_attr "$1" vers)
+
+	echo "name: $name" > $2
+	echo "vers: $vers" >> $2
+}
+
 c_uninstall() {
 	echo "Not implemented yet, sorry :(."
 }
@@ -198,6 +214,9 @@ case "$cmd" in
 	install)
 		[ -z "$1" ] && usage
 		c_install "$@"
+		;;
+	make-manifest)
+		c_make_manifest "$@"
 		;;
 	uninstall)
 		c_uninstall "$@"
