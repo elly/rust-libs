@@ -26,6 +26,7 @@
 #/   cargo install file:$HOME/tmp/package.tar
 #/   cargo install uuid:83941200-18b3-41b1-8316-b98a2950b33a
 #/   cargo install http://www.leptoquark.net/~elly/rust-hello.tar
+#/   cargo install -s elly@leptoquark.net http://www.leptoquark.net/~elly/rust-hello.tar
 #/   cargo make-manifest hello.rc manifest
 
 die() {
@@ -83,9 +84,11 @@ get_manifest() {
 	 sed -n "/^$1: /{s/^$1: //;p}" manifest
 }
 
-# Support three kinds of key checks:
+# Support two kinds of key checks:
 #   user@host - looked up in existing keyring
 #   short keyid - existing keyring
+# Argument is one of these; we operate on the manifest{,.sig} in the current
+# directory.
 check_sig_specific() {
 	r=$(gpg --verify manifest.sig manifest 2>&1)
 	if ! echo "$r" | grep -q "Good signature from"; then
@@ -111,6 +114,8 @@ check_sig_specific() {
 	die
 }
 
+# Read hashes out of the manifest (key-val pairs starting with 'hash-') and
+# verify them.
 check_hashes() {
 	sed -n '/^hash-/{s/^hash-\([^:]\+\): \(.\+\)/\2  \1/;p}' manifest \
 		| while read line; do
@@ -122,8 +127,6 @@ check_hashes() {
 # Install a package from source, which is unpacked in the current directory.
 # Read the name and version out of the manifest, then build, optionally test,
 # and install the package, and symlink any libraries it creates into place.
-# XXX: Manifest signing support
-# XXX: Checksumming support
 # The directory structure we expect is:
 #   /manifest: Key-value file with at least keys 'name' and 'version'.
 c_install_source() {
@@ -241,6 +244,9 @@ read_rc_attr() {
 	sed -n "/$2 = \"/{s/.*$2 = \"\([^\"]*\)\".*/\1/;p}" "$1"
 }
 
+# Generate a manifest file. $1 is the crate file (the .rc file), $2 is the
+# manifest file to write. Any additional args are included in the set to be
+# hashed as filenames.
 c_make_manifest() {
 	if [ "$1" = "-s" ]; then
 		[ -z "$2" ] && usage
