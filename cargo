@@ -130,13 +130,13 @@ check_hashes() {
 # The directory structure we expect is:
 #   /manifest: Key-value file with at least keys 'name' and 'version'.
 c_install_source() {
-	need_rustc
 	if [ ! -z "$NEEDED_SIGNER" ]; then
 		check_sig_specific "$NEEDED_SIGNER"
 		check_hashes
 	fi
 	local name=$(get_manifest name)
 	local vers=$(get_manifest vers)
+	local bootstrap=$(get_manifest bootstrap)
 	local build=$(get_manifest build)
 	local test=$(get_manifest test)
 	local install=$(get_manifest install)
@@ -144,11 +144,16 @@ c_install_source() {
 	[ -z "$vers" ] && die "required property 'vers' missing"
 	[ -z "$build" ] && build=make
 	[ -z "$install" ] && install="make install"
+	[ -z "$bootstrap" ] && need_rustc
 	rustc=$(get_config rustc)
 	destdir=$(make_fixdir "$name" "$vers")
+	if [ -x  ./configure ]; then
+		RUSTC="$rustc" ./configure --prefix="$destdir"
+	fi
 	RUSTC="$rustc" PREFIX="$destdir" $build || die "build failed: $build"
-	[ ! -z "$test" ] && (RUSTC="$rustc" PREFIX="$destdir" $test \
-		|| die "test failed: $test")
+	if [ ! -z "$test" ]; then
+		RUSTC="$rustc" PREFIX="$destdir" $test || die "test failed: $test"
+	fi
 	RUSTC="$rustc" PREFIX="$destdir" $install \
 		|| die "install failed: $install"
 	local workdir="$PWD"
@@ -176,7 +181,7 @@ c_install_github() {
 	d=$(make_workdir "$pkgname")
 	cd "$d"
 	git clone "git://github.com/$repopath" "$d" || die "git clone failed"
-	if [ ! -z "$commitid" ]; then
+	if [ ! -z "$commit" ]; then
 		git checkout "$commit" || die "git checkout $commit failed"
 	fi
 	c_install_source
